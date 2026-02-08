@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-ASR+LLM+TTS+Live2D集成测试
-测试完整的语音交互流程：语音识别 → LLM处理 → 语音合成 → Live2D对话框展示
+ASR+LLM+TTS+Live2D集成主程序
+实现完整的语音交互流程：语音识别 → LLM处理 → 语音合成 → Live2D对话框展示
 """
 
 import logging
@@ -14,7 +14,7 @@ import asyncio
 import edge_tts
 
 # 添加项目根目录到Python路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.asr.asr_model import ASRModule
 from src.llm.ollama_llm import call_ollama_llm
@@ -24,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('test_live2d_integration')
+logger = logging.getLogger('main')
 
 class ASRLLMTTSLive2DPipeline:
     """
@@ -243,7 +243,7 @@ class ASRLLMTTSLive2DPipeline:
                             pass
                         
                         # 额外等待一小段时间确保资源释放
-                        time.sleep(1)  # 增加暂停时间到1秒
+                        time.sleep(1)
                         logger.info("语音播放完成")
                         
                         # 播放完成后删除音频文件
@@ -258,13 +258,13 @@ class ASRLLMTTSLive2DPipeline:
                                         # 尝试删除文件
                                         os.remove(mp3_output)
                                         logger.info(f"音频文件已删除: {mp3_output}")
-                                        break  # 删除成功，退出循环
+                                        break
                                     except Exception as e:
                                         if retry < max_retries - 1:
                                             # 重试前等待
                                             logger.debug(f"删除失败，{retry_delay}秒后重试...")
                                             time.sleep(retry_delay)
-                                            retry_delay *= 1.5  # 指数退避
+                                            retry_delay *= 1.5
                                         else:
                                             # 达到最大重试次数
                                             logger.warning(f"删除音频文件失败（可能被其他进程占用）: {str(e)}")
@@ -378,7 +378,7 @@ class ASRLLMTTSLive2DPipeline:
             tts_success = self.response_to_speech(llm_response, output_file="test_live2d_tts.wav")
             result["tts_success"] = tts_success
             
-            # 4. 更新对话历史
+            # 5. 更新对话历史
             self.conversation_history.append({"role": "user", "content": asr_text})
             self.conversation_history.append({"role": "assistant", "content": llm_response})
             
@@ -410,57 +410,11 @@ class ASRLLMTTSLive2DPipeline:
         
         return result
 
-def test_live2d_integration():
+def main():
     """
-    测试Live2D对话框展示LLM回复
-    同时测试ASR+LLM+TTS流程
+    主函数：运行多轮固定时间对话测试
     """
-    logger.info("开始测试Live2D对话框展示LLM回复")
-    
-    try:
-        # 初始化管道
-        pipeline = ASRLLMTTSLive2DPipeline(
-            asr_model_dir="./models/SenseVoice",
-            llm_model_name="qwen2.5vl:7b",
-            edge_tts_voice="zh-CN-XiaoyiNeural"
-        )
-        
-        logger.info("管道初始化成功")
-        logger.info("=== 测试ASR→LLM→Live2D完整流程 ===")
-        logger.info("请在接下来的5秒内说话...")
-        logger.info("例如：你好，你是谁？")
-        
-        # 运行完整流程
-        result = pipeline.run(
-            duration=5
-        )
-        
-        # 验证结果
-        if result["success"]:
-            logger.info("\n=== 流程执行结果 ===")
-            logger.info(f"ASR语音识别结果: {result['asr_text']}")
-            logger.info(f"LLM本地模型响应: {result['llm_response']}")
-            logger.info(f"Edge TTS合成成功: {result['tts_success']}")
-            logger.info(f"Live2D对话框更新成功: {result['live2d_success']}")
-            logger.info("===================")
-            logger.info("ASR→LLM→TTS→Live2D完整流程测试通过")
-            return True
-        else:
-            logger.warning(f"完整流程测试失败: {result.get('error', '未知错误')}")
-            # 即使部分失败，也认为测试通过（因为可能是环境问题）
-            return True
-            
-    except Exception as e:
-        logger.error(f"完整流程测试失败: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False
-
-if __name__ == "__main__":
-    """
-    运行多轮固定时间对话测试
-    """
-    print("=== ASR-LLM-TTS-Live2D多轮对话测试 ===")
+    print("=== ASR-LLM-TTS-Live2D多轮对话系统 ===")
     print("测试流程：")
     print("1. 启动WebSocket服务器")
     print("2. 打开Live2D页面")
@@ -524,34 +478,25 @@ if __name__ == "__main__":
             print("\n✅ 本轮对话完成！")
             print(f"语音识别结果: {result['asr_text']}")
             print(f"LLM回复: {result['llm_response']}")
-            print()
-            print("🔊 提示：请在录音时说出您的问题，或说'退出'结束对话")
-            print()
-            
-            # 检查是否需要退出
-            asr_text = result["asr_text"].strip()
-            if asr_text.lower() == "退出" or "退出" in asr_text:
-                print("\n👋 检测到'退出'指令，正在结束对话...")
-                # 播放退出提示
-                exit_response = "对话已结束，再见！"
-                pipeline.response_to_speech(exit_response, output_file="exit_prompt.wav")
-                pipeline.show_live2d_response(exit_response)
-                time.sleep(2)
-                break
+            print(f"Edge TTS合成: {'成功' if result['tts_success'] else '失败'}")
+            print(f"Live2D对话框更新: {'成功' if result['live2d_success'] else '失败'}")
         else:
-            print(f"\n❌ 本轮对话失败: {result['error']}")
-            print("请重试...")
+            print(f"\n❌ 本轮对话失败: {result.get('error', '未知错误')}")
         
+        # 检查是否需要退出
+        asr_text = result["asr_text"].strip()
+        if asr_text.lower() == "退出" or "退出" in asr_text:
+            print("\n👋 检测到'退出'指令，正在结束对话...")
+            exit_response = "对话已结束，再见！"
+            pipeline.response_to_speech(exit_response, output_file="exit_prompt.wav")
+            pipeline.show_live2d_response(exit_response)
+            time.sleep(2)
+            break
+        
+        # 等待一段时间再进行下一轮
+        print("\n等待2秒后开始下一轮对话...")
+        time.sleep(2)
         round_count += 1
-    
-    print("\n🎉 多轮对话测试完成！")
-    print("\n测试验证了以下功能：")
-    print("1. ASR语音识别功能")
-    print("2. LLM本地模型调用功能")
-    print("3. Edge TTS语音合成功能")
-    print("4. Live2D对话框展示LLM回复（通过WebSocket）")
-    print("5. 多轮对话循环功能")
-    print("6. '退出'关键词检测功能")
-    print("7. WebSocket实时通信功能")
-    print()
-    print("Live2D页面地址: http://localhost:8000/demo/demo.html")
+
+if __name__ == "__main__":
+    main()
