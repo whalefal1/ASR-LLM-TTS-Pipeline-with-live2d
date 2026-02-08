@@ -9,8 +9,6 @@ import logging
 import sys
 import os
 import time
-import webbrowser
-import urllib.parse
 import pygame
 import asyncio
 import edge_tts
@@ -292,7 +290,7 @@ class ASRLLMTTSLive2DPipeline:
     
     def show_live2d_response(self, response):
         """
-        在Live2D对话框中展示LLM回复
+        在Live2D对话框中展示LLM回复（通过WebSocket）
         
         Args:
             response (str): LLM模型的响应
@@ -301,21 +299,32 @@ class ASRLLMTTSLive2DPipeline:
             bool: 是否成功
         """
         try:
-            logger.info("开始更新Live2D对话框...")
+            logger.info("开始更新Live2D对话框（通过WebSocket）...")
             
-            # 构建URL参数
-            encoded_response = urllib.parse.quote(response)
-            live2d_url = f"http://localhost:8000/demo/demo.html?response={encoded_response}"
+            # 导入WebSocket客户端
+            from src.websocket.live2d_ws_server import send_llm_response
             
-            logger.info(f"Live2D对话框URL: {live2d_url}")
+            # 使用异步方式发送消息
+            try:
+                # 尝试获取现有事件循环
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果没有事件循环，创建一个新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             
-            # 打开Live2D页面
-            webbrowser.open(live2d_url)
-            logger.info("Live2D对话框已打开")
+            success = loop.run_until_complete(send_llm_response(response, duration=8000))
             
-            return True
+            if success:
+                logger.info("Live2D对话框已更新（通过WebSocket）")
+            else:
+                logger.warning("WebSocket发送失败，可能没有连接的客户端")
+            
+            return success
         except Exception as e:
             logger.error(f"更新Live2D对话框失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def run(self, duration=5):
@@ -341,17 +350,6 @@ class ASRLLMTTSLive2DPipeline:
         }
         
         try:
-            # 0. 首先打开Live2D页面（在语音识别之前）
-            logger.info("正在打开Live2D页面...")
-            # 先打开初始状态的Live2D页面
-            initial_url = "http://localhost:8000/demo/demo.html"
-            import webbrowser
-            webbrowser.open(initial_url)
-            logger.info(f"Live2D页面已打开: {initial_url}")
-            
-            # 等待页面加载完成
-            time.sleep(2)
-            
             # 1. 语音转文本
             asr_text = self.speech_to_text(duration=duration)
             if not asr_text:
@@ -460,30 +458,100 @@ def test_live2d_integration():
 
 if __name__ == "__main__":
     """
-    运行Live2D集成测试
+    运行多轮固定时间对话测试
     """
-    logger.info("开始运行ASR→LLM→Live2D集成测试")
-    logger.info("======================================")
+    print("=== ASR-LLM-TTS-Live2D多轮对话测试 ===")
+    print("测试流程：")
+    print("1. 启动WebSocket服务器")
+    print("2. 打开Live2D页面")
+    print("3. 语音识别（5秒录音）")
+    print("4. 本地LLM处理")
+    print("5. Edge TTS合成并播放")
+    print("6. Live2D对话框展示回复（通过WebSocket）")
+    print()
+    print("🔊 提示：请在录音时说出您的问题，或说'退出'结束对话")
+    print()
     
-    # 运行Live2D集成测试
-    test_passed = test_live2d_integration()
-    logger.info("======================================")
+    # 启动WebSocket服务器
+    print("正在启动WebSocket服务器...")
+    from src.websocket.live2d_ws_server import get_ws_server
+    import threading
     
-    if test_passed:
-        logger.info("🎉 测试通过！")
-        print("✅ 测试通过！")
-        print("\n测试验证了以下功能：")
-        print("1. ASR语音识别功能")
-        print("2. LLM本地模型调用功能")
-        print("3. Edge TTS语音合成功能")
-        print("4. Live2D对话框展示LLM回复")
-        print("5. 完整的ASR→LLM→TTS→Live2D级联流程")
-    else:
-        logger.error("❌ 测试失败！")
-        print("❌ 测试失败！")
+    # 在后台线程中启动WebSocket服务器
+    def start_ws_server():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        server = loop.run_until_complete(get_ws_server())
+        loop.run_forever()
     
-    # 提示用户查看Live2D对话框和验证语音播放
-    print("\n请验证以下内容：")
-    print("1. 浏览器中的Live2D对话框是否显示了LLM回复")
-    print("2. 是否听到了Edge TTS合成的语音")
-    print("\nLive2D页面地址: http://localhost:8000/demo/demo.html")
+    ws_thread = threading.Thread(target=start_ws_server, daemon=True)
+    ws_thread.start()
+    print("✅ WebSocket服务器已启动（ws://localhost:8765）")
+    time.sleep(1)
+    
+    # 打开Live2D页面（只打开一次）
+    print("正在打开Live2D页面...")
+    import webbrowser
+    webbrowser.open("http://localhost:8000/demo/demo.html")
+    print("✅ Live2D页面已打开")
+    print()
+    print("等待WebSocket连接建立...")
+    time.sleep(3)
+    
+    # 创建测试实例
+    pipeline = ASRLLMTTSLive2DPipeline(
+        asr_model_dir="./models/SenseVoice",
+        llm_model_name="qwen2.5vl:7b",
+        edge_tts_voice="zh-CN-XiaoyiNeural"
+    )
+    
+    # 多轮对话循环
+    round_count = 1
+    while True:
+        print(f"\n=== 第 {round_count} 轮对话 ===")
+        print("请准备好，3秒后开始录音...")
+        # 3秒倒计时
+        for i in range(3, 0, -1):
+            print(f"{i}...")
+            time.sleep(1)
+        print("开始录音！请说出您的问题...")
+        
+        # 运行一轮测试
+        result = pipeline.run(duration=5)
+        
+        # 打印本轮结果
+        if result["success"]:
+            print("\n✅ 本轮对话完成！")
+            print(f"语音识别结果: {result['asr_text']}")
+            print(f"LLM回复: {result['llm_response']}")
+            print()
+            print("🔊 提示：请在录音时说出您的问题，或说'退出'结束对话")
+            print()
+            
+            # 检查是否需要退出
+            asr_text = result["asr_text"].strip()
+            if asr_text.lower() == "退出" or "退出" in asr_text:
+                print("\n👋 检测到'退出'指令，正在结束对话...")
+                # 播放退出提示
+                exit_response = "对话已结束，再见！"
+                pipeline.response_to_speech(exit_response, output_file="exit_prompt.wav")
+                pipeline.show_live2d_response(exit_response)
+                time.sleep(2)
+                break
+        else:
+            print(f"\n❌ 本轮对话失败: {result['error']}")
+            print("请重试...")
+        
+        round_count += 1
+    
+    print("\n🎉 多轮对话测试完成！")
+    print("\n测试验证了以下功能：")
+    print("1. ASR语音识别功能")
+    print("2. LLM本地模型调用功能")
+    print("3. Edge TTS语音合成功能")
+    print("4. Live2D对话框展示LLM回复（通过WebSocket）")
+    print("5. 多轮对话循环功能")
+    print("6. '退出'关键词检测功能")
+    print("7. WebSocket实时通信功能")
+    print()
+    print("Live2D页面地址: http://localhost:8000/demo/demo.html")
